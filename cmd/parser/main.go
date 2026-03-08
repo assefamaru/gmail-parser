@@ -5,9 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/assefamaru/gmail-parser/internal/client/gmail"
 	"github.com/assefamaru/gmail-parser/internal/parser/etf"
+)
+
+const (
+	fromDateStr = "2026-01-01"
+	toDateStr   = "2026-12-31"
 )
 
 func main() {
@@ -25,8 +31,18 @@ func runParser(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create gmail client: %w", err)
 	}
+	fromDate, err := time.Parse("2006-01-02", fromDateStr)
+	if err != nil {
+		return fmt.Errorf("parse fromDate: %w", err)
+	}
+	toDate, err := time.Parse("2006-01-02", toDateStr)
+	if err != nil {
+		return fmt.Errorf("parse toDate: %w", err)
+	}
 	parserOpts := &etf.ParserOptions{
-		Client: client,
+		Client:   client,
+		FromDate: fromDate,
+		ToDate:   toDate,
 	}
 	parser, err := etf.NewParser(parserOpts)
 	if err != nil {
