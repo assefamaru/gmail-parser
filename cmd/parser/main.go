@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/assefamaru/gmail-parser/internal/client/gmail"
+	"github.com/assefamaru/gmail-parser/internal/parser/etf"
 )
 
 func main() {
@@ -19,22 +21,28 @@ func runParser(ctx context.Context) error {
 	gmailOpts := &gmail.Options{
 		CredFilePath: "credentials.json",
 	}
-	gmailClient, err := gmail.NewClient(ctx, gmailOpts)
+	client, err := gmail.NewClient(ctx, gmailOpts)
 	if err != nil {
 		return fmt.Errorf("create gmail client: %w", err)
 	}
-
-	// Temp.
-	user := "me"
-	r, err := gmailClient.Client().Users.Labels.List(user).Do()
+	parserOpts := &etf.ParserOptions{
+		Client: client,
+	}
+	parser, err := etf.NewParser(parserOpts)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve labels: %w", err)
+		return fmt.Errorf("create parser: %w", err)
 	}
-	if len(r.Labels) == 0 {
-		return fmt.Errorf("no labels found")
+	etfData, err := parser.Parse(ctx)
+	if err != nil {
+		return fmt.Errorf("parse data: %w", err)
 	}
-	for _, label := range r.Labels {
-		fmt.Println("-", label.Name)
+
+	// Print data for now.
+	out, err := json.Marshal(etfData)
+	if err != nil {
+		return fmt.Errorf("marshal parsed data: %w", err)
 	}
+	fmt.Println(string(out))
+
 	return nil
 }
