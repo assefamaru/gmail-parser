@@ -36,11 +36,11 @@ type Parser struct {
 
 // ETransfer represents the structure of a single e-transfer payload.
 type ETransfer struct {
-	From   *User     // message.Payload.Headers["Reply-To"]
-	To     *User     // message.Payload.Headers["To"]
-	Date   time.Time // message.Payload.Headers["X-Date"]
-	Amount string    // message.Payload.Headers["Subject"]
-	RefID  string    // message.Payload.Headers["X-PaymentKey"]
+	From   *User  // message.Payload.Headers["Reply-To"]
+	To     *User  // message.Payload.Headers["To"]
+	Date   string // message.Payload.Headers["X-Date"]
+	Amount string // message.Payload.Headers["Subject"]
+	RefID  string // message.Payload.Headers["X-PaymentKey"]
 
 	TransferType TransferType
 	Subject      string // message.Payload.Headers["Subject"]
@@ -93,7 +93,7 @@ func NewParser(opts *ParserOptions) (*Parser, error) {
 func (p *Parser) Parse(_ context.Context) ([]*ETransfer, error) {
 	var parsedMessages []*ETransfer
 	var nextPageToken string
-	for range 10 {
+	for range 1000 {
 		query := p.query
 		if nextPageToken != "" {
 			query = nextPageToken
@@ -141,11 +141,11 @@ func (p *Parser) parseMessage(message *apiv1.Message) (*ETransfer, error) {
 			parsed.To = p.parseUser(header.Value)
 		}
 		if header.Name == "X-Date" {
-			parsedDate, err := time.Parse("2006-01-02", header.Value)
+			parsedDate, err := time.Parse("02-01-2006 15:04", header.Value)
 			if err != nil {
 				return nil, fmt.Errorf("parse X-Date %q: %w", header.Value, err)
 			}
-			parsed.Date = parsedDate
+			parsed.Date = parsedDate.Format(time.DateOnly)
 		}
 		if header.Name == "X-PaymentKey" {
 			parsed.RefID = header.Value
@@ -170,8 +170,8 @@ func (p *Parser) parseUser(s string) *User {
 }
 
 func buildQuery(fromDate, toDate time.Time) string {
-	from := fromDate.UTC().String()
-	to := toDate.UTC().String()
+	from := fromDate.Format(time.DateOnly)
+	to := toDate.Format(time.DateOnly)
 	return fmt.Sprintf("@payments.interac.ca after:%s before:%s", from, to)
 }
 

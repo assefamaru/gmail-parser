@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/assefamaru/gmail-parser/internal/client/gmail"
@@ -54,11 +55,30 @@ func runParser(ctx context.Context) error {
 	}
 
 	// Print data for now.
+	if err := printData(etfData); err != nil {
+		return fmt.Errorf("print information: %w", err)
+	}
+
+	return nil
+}
+
+func printData(etfData []*etf.ETransfer) error {
 	out, err := json.Marshal(etfData)
 	if err != nil {
 		return fmt.Errorf("marshal parsed data: %w", err)
 	}
+	var sent, received, unknown int
+	for _, entry := range etfData {
+		switch entry.TransferType {
+		case etf.Sent:
+			sent++
+		case etf.Received:
+			received++
+		case etf.Unknown:
+			unknown++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "Sent: %v\nReceived: %v\nUnknown: %v\n", sent, received, unknown)
 	fmt.Println(string(out))
-
 	return nil
 }
