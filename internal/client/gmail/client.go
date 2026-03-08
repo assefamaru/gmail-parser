@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	"golang.org/x/oauth2"
@@ -22,6 +23,9 @@ const (
 	// created automatically when the auth flow completes the
 	// first time.
 	tokenFile = "token.json"
+
+	callbackAddr     = ":8080"
+	callbackEndpoint = "/google/callback"
 )
 
 // Options is used to configure a new gmail client.
@@ -34,6 +38,8 @@ type Options struct {
 // Client instruments a GMail client.
 type Client struct {
 	service *gmail.Service
+	config  *oauth2.Config
+	token   *oauth2.Token
 }
 
 // NewClient creates a new gmail Client.
@@ -49,18 +55,13 @@ func NewClient(ctx context.Context, opts *Options) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build google config: %w", err)
 	}
-	token, err := fetchToken(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("fetch auth token: %w", err)
+	client := &Client{
+		config: config,
 	}
-	client := config.Client(ctx, token)
-	service, err := gmail.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		return nil, fmt.Errorf("create gmail service: %w", err)
+	if err := client.registerService(ctx); err != nil {
+		return nil, err
 	}
-	return &Client{
-		service: service,
-	}, nil
+	return client, nil
 }
 
 // Client surfaces the gmail service for client interactions.
@@ -68,53 +69,67 @@ func (c *Client) Client() *gmail.Service {
 	return c.service
 }
 
-// fetchToken retrieves an auth token either from local cache, or
+func (c *Client) registerService(ctx context.Context) error {
+	if err := c.registerToken(ctx); err != nil {
+		return fmt.Errorf("fetch auth token: %w", err)
+	}
+	client := c.config.Client(ctx, c.token)
+	service, err := gmail.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return fmt.Errorf("create gmail service: %w", err)
+	}
+	c.service = service
+	return nil
+}
+
+// registerToken retrieves an auth token either from local cache, or
 // from web. If retrieved from web, it also auto-caches the token
 // to a local file.
-func fetchToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
-	if token, err := tokenFromFile(); err == nil {
-		return token, nil
+func (c *Client) registerToken(ctx context.Context) error {
+	if err := c.registerTokenFromFile(); err == nil {
+		return nil
 	}
-	token, err := tokenFromWeb(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("retrieve token from web: %w", err)
+	if err := c.registerTokenFromWeb(ctx, c.config); err != nil {
+		return fmt.Errorf("retrieve token from web: %w", err)
 	}
-	if err := cacheToken(token); err != nil {
-		return nil, fmt.Errorf("cache token: %w", err)
+	if err := cacheToken(c.token); err != nil {
+		return fmt.Errorf("cache token: %w", err)
 	}
-	return token, nil
+	return nil
 }
 
-// tokenFromFile retrieves a token from a local file.
-func tokenFromFile() (*oauth2.Token, error) {
+// registerTokenFromFile retrieves a token from a local file.
+func (c *Client) registerTokenFromFile() error {
 	f, err := os.Open(tokenFile)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
-	tok := &oauth2.Token{}
-	if err := json.NewDecoder(f).Decode(tok); err != nil {
-		return nil, err
+	token := &oauth2.Token{}
+	if err := json.NewDecoder(f).Decode(token); err != nil {
+		return err
 	}
-	return tok, nil
+	c.token = token
+	return nil
 }
 
-// tokenFromWeb requests a token from the web, and returns the
-// retrieved token.
-func tokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
+// registerTokenFromWeb requests a token from the web, and
+// registers the retrieved token.
+func (c *Client) registerTokenFromWeb(ctx context.Context, config *oauth2.Config) error {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Go to the following link in your browser then type the "+
 		"authorization code: \n%v\n", authURL)
 
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		return nil, fmt.Errorf("unable to read authorization code: %w", err)
+	errCh := make(chan error, 1)
+	go func() {
+		http.HandleFunc(callbackEndpoint, c.handleCallback(ctx, errCh))
+
+		http.ListenAndServe(callbackAddr, nil)
+	}()
+	if err := <-errCh; err != nil {
+		return fmt.Errorf("handle auth callback: %w", err)
 	}
-	token, err := config.Exchange(ctx, authCode)
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve token from web: %w", err)
-	}
-	return token, nil
+	return nil
 }
 
 // cacheToken saves a valid token to local file.
@@ -126,4 +141,17 @@ func cacheToken(token *oauth2.Token) error {
 	}
 	defer f.Close()
 	return json.NewEncoder(f).Encode(token)
+}
+
+func (c *Client) handleCallback(ctx context.Context, errCh chan<- error) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authCode := r.FormValue("code")
+		token, err := c.config.Exchange(ctx, authCode)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		c.token = token
+		errCh <- nil
+	}
 }
