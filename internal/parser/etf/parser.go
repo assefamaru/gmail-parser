@@ -155,6 +155,9 @@ func (p *Parser) parseMessage(message *apiv1.Message) (*ETransfer, error) {
 			parsed.Amount = p.dollarRegexp.FindString(header.Value)
 			parsed.TransferType = transferType(header.Value)
 		}
+		parsed.Amount = strings.TrimSuffix(parsed.Amount, ".00")
+		parsed.Amount = strings.ReplaceAll(parsed.Amount, ",", "")
+		parsed.Amount = strings.ReplaceAll(parsed.Amount, "$", "")
 	}
 	return parsed, nil
 }
