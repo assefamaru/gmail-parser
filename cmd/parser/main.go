@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -13,12 +14,13 @@ import (
 	"github.com/assefamaru/gmail-parser/internal/parser/etf"
 )
 
-const (
-	fromDateStr = "2026-01-01"
-	toDateStr   = "2026-12-31"
+var (
+	fromDateStr = flag.String("from", "2026-01-01", "Date filter for earliest message to fetch")
+	toDateStr   = flag.String("to", "2026-12-31", "Date filter for latest message to fetch")
 )
 
 func main() {
+	flag.Parse()
 	ctx := context.Background()
 	if err := runParser(ctx); err != nil {
 		log.Fatal(err)
@@ -33,11 +35,11 @@ func runParser(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create gmail client: %w", err)
 	}
-	fromDate, err := time.Parse("2006-01-02", fromDateStr)
+	fromDate, err := time.Parse("2006-01-02", *fromDateStr)
 	if err != nil {
 		return fmt.Errorf("parse fromDate: %w", err)
 	}
-	toDate, err := time.Parse("2006-01-02", toDateStr)
+	toDate, err := time.Parse("2006-01-02", *toDateStr)
 	if err != nil {
 		return fmt.Errorf("parse toDate: %w", err)
 	}
