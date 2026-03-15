@@ -178,8 +178,15 @@ func (p *Parser) parseMessage(message *apiv1.Message) (*ETransfer, error) {
 						continue
 					}
 					parsed.Message = p.parseUesrMessage(decodedStr)
+					break
 				}
 			}
+			if parsed.Message != "" {
+				break
+			}
+		}
+		if parsed.Message != "" {
+			break
 		}
 	}
 	if parsed.Message == "" {

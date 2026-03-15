@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/assefamaru/gmail-parser/internal/client/gmail"
+	"github.com/assefamaru/gmail-parser/internal/parser/donation"
 	"github.com/assefamaru/gmail-parser/internal/parser/etf"
 )
 
@@ -48,64 +49,79 @@ func runParser(ctx context.Context) error {
 		FromDate: fromDate,
 		ToDate:   toDate,
 	}
-	parser, err := etf.NewParser(parserOpts)
+	etfParser, err := etf.NewParser(parserOpts)
 	if err != nil {
-		return fmt.Errorf("create parser: %w", err)
+		return fmt.Errorf("create etf parser: %w", err)
 	}
-	etfData, err := parser.Parse(ctx)
+	etfData, err := etfParser.Parse(ctx)
 	if err != nil {
-		return fmt.Errorf("parse data: %w", err)
+		return fmt.Errorf("parse etf data: %w", err)
+	}
+	donateOpts := &donation.ParserOptions{
+		Client:   client,
+		FromDate: fromDate,
+		ToDate:   toDate,
+	}
+	donateParser, err := donation.NewParser(donateOpts)
+	if err != nil {
+		return fmt.Errorf("create donation parser: %w", err)
+	}
+	donateData, err := donateParser.Parse(ctx)
+	if err != nil {
+		return fmt.Errorf("parse donation data: %w", err)
 	}
 
 	// Write data to CSV and JSON for now.
-	if err := writeData(etfData); err != nil {
+	if err := writeData(etfData, donateData); err != nil {
 		return fmt.Errorf("write data: %w", err)
 	}
 
 	return nil
 }
 
-func writeData(etfData []*etf.ETransfer) error {
-	var sent, received, unknown []*etf.ETransfer
+func writeData(etfData []*etf.ETransfer, donateData []*donation.Donation) error {
+	var sent, receivedETF, unknownETF []*etf.ETransfer
 	for _, entry := range etfData {
 		switch entry.TransferType {
 		case etf.Sent:
 			sent = append(sent, entry)
 		case etf.Received:
-			received = append(received, entry)
+			receivedETF = append(receivedETF, entry)
 		case etf.Unknown:
-			unknown = append(unknown, entry)
+			unknownETF = append(unknownETF, entry)
 		}
 	}
-	if err := writeCSV(sent, "sent.csv"); err != nil {
+	if err := writeCSV(sent, nil, "sent.csv"); err != nil {
 		return fmt.Errorf("write sent csv: %w", err)
 	}
-	if err := writeCSV(received, "received.csv"); err != nil {
+	if err := writeCSV(receivedETF, donateData, "received.csv"); err != nil {
 		return fmt.Errorf("write received csv: %w", err)
 	}
-	if err := writeCSV(unknown, "unknown.csv"); err != nil {
+	if err := writeCSV(unknownETF, nil, "unknown.csv"); err != nil {
 		return fmt.Errorf("write unknown csv: %w", err)
 	}
-	out, err := json.Marshal(etfData)
-	if err != nil {
-		return fmt.Errorf("marshal parsed data: %w", err)
-	}
-	if err := os.WriteFile("data.json", out, 0600); err != nil {
-		return err
-	}
 
-	fmt.Fprintf(os.Stderr, "Sent: %v\nReceived: %v\nUnknown: %v\n", len(sent), len(received), len(unknown))
+	var all []any
+	all = append(all, etfData)
+	all = append(all, donateData)
+	allData, _ := json.Marshal(all)
+	os.WriteFile("data.json", allData, 0600)
+
+	fmt.Fprintf(os.Stderr, "Sent: %v\nReceived: %v\nUnknown: %v\n", len(sent), len(receivedETF)+len(donateData), len(unknownETF))
 	return nil
 }
 
-func writeCSV(data []*etf.ETransfer, dest string) error {
-	if len(data) == 0 {
+func writeCSV(etfData []*etf.ETransfer, donateData []*donation.Donation, dest string) error {
+	if len(etfData) == 0 && len(donateData) == 0 {
 		return nil
 	}
 	var sb strings.Builder
-	sb.WriteString("ReferenceNumber,Date,Amount,SenderName,SenderEmail,Message,ReceiverName,ReceiverEmail\n")
-	for _, d := range data {
-		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,%s,%s,%s\n", d.RefID, d.Date, d.Amount, d.From.Name, d.From.Email, d.Message, d.To.Name, d.To.Email)
+	sb.WriteString("ReferenceNumber,Date,Amount,SenderName,SenderEmail,Type,ContributionFor,ReceiverEmail,ReceiverName\n")
+	for _, d := range etfData {
+		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,E-Transfer,%s,%s,%s\n", d.RefID, d.Date, d.Amount, d.From.Name, d.From.Email, d.Message, d.To.Email, d.To.Name)
+	}
+	for _, d := range donateData {
+		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,Online Donation,%s,%s,%s\n", d.RefID, d.Date, d.Amount, d.From.Name, d.From.Email, d.Purpose, d.To.Email, d.To.Name)
 	}
 	return os.WriteFile(dest, []byte(sb.String()), 0600)
 }
