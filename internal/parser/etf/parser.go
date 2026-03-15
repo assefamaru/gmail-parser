@@ -3,6 +3,7 @@ package etf
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -27,20 +28,22 @@ type ParserOptions struct {
 // Parser is used to instrument parsing e-transfer information
 // from gmail messages.
 type Parser struct {
-	client       *gmail.Client
-	query        string
-	dollarRegexp *regexp.Regexp
-	userRegexp   *regexp.Regexp
-	user         string
+	client        *gmail.Client
+	query         string
+	dollarRegexp  *regexp.Regexp
+	userRegexp    *regexp.Regexp
+	messageRegexp *regexp.Regexp
+	user          string
 }
 
 // ETransfer represents the structure of a single e-transfer payload.
 type ETransfer struct {
-	From   *User  // message.Payload.Headers["Reply-To"]
-	To     *User  // message.Payload.Headers["To"]
-	Date   string // message.Payload.Headers["X-Date"]
-	Amount string // message.Payload.Headers["Subject"]
-	RefID  string // message.Payload.Headers["X-PaymentKey"]
+	From    *User  // message.Payload.Headers["Reply-To"]
+	To      *User  // message.Payload.Headers["To"]
+	Date    string // message.Payload.Headers["X-Date"]
+	Amount  string // message.Payload.Headers["Subject"]
+	RefID   string // message.Payload.Headers["X-PaymentKey"]
+	Message string // Parsed from body
 
 	TransferType TransferType
 	Subject      string // message.Payload.Headers["Subject"]
@@ -79,12 +82,17 @@ func NewParser(opts *ParserOptions) (*Parser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compile user parse regexp: %w", err)
 	}
+	messageRegexp, err := regexp.Compile(`(?s)Message:.*?Date:`)
+	if err != nil {
+		return nil, fmt.Errorf("compile message parse regexp: %w", err)
+	}
 	return &Parser{
-		client:       opts.Client,
-		query:        buildQuery(opts.FromDate, opts.ToDate),
-		dollarRegexp: dollarRegexp,
-		userRegexp:   userRegexp,
-		user:         "me",
+		client:        opts.Client,
+		query:         buildQuery(opts.FromDate, opts.ToDate),
+		dollarRegexp:  dollarRegexp,
+		userRegexp:    userRegexp,
+		messageRegexp: messageRegexp,
+		user:          "me",
 	}, nil
 }
 
@@ -159,6 +167,24 @@ func (p *Parser) parseMessage(message *apiv1.Message) (*ETransfer, error) {
 		parsed.Amount = strings.ReplaceAll(parsed.Amount, ",", "")
 		parsed.Amount = strings.ReplaceAll(parsed.Amount, "$", "")
 	}
+	for _, part := range message.Payload.Parts {
+		for _, part := range part.Parts {
+			for _, part := range part.Parts {
+				if part.Body.Data != "" {
+					// Best effort.
+					decoded, _ := base64.StdEncoding.DecodeString(part.Body.Data)
+					decodedStr := string(decoded)
+					if !strings.Contains(decodedStr, "Transfer Details") {
+						continue
+					}
+					parsed.Message = p.parseUesrMessage(decodedStr)
+				}
+			}
+		}
+	}
+	if parsed.Message == "" {
+		parsed.Message = "N/A"
+	}
 	return parsed, nil
 }
 
@@ -170,6 +196,18 @@ func (p *Parser) parseUser(s string) *User {
 		user.Email = matches[2]
 	}
 	return user
+}
+
+func (p *Parser) parseUesrMessage(s string) string {
+	matches := p.messageRegexp.FindStringSubmatch(strings.TrimSpace(s))
+	if len(matches) == 1 {
+		msg := strings.TrimPrefix(strings.TrimSuffix(matches[0], "Date:"), "Message:")
+		msg = strings.ReplaceAll(msg, "\n", " ")
+		msg = strings.ReplaceAll(msg, ",", " ")
+		msg = strings.ReplaceAll(msg, "\r", "")
+		return strings.TrimSpace(msg)
+	}
+	return ""
 }
 
 func buildQuery(fromDate, toDate time.Time) string {

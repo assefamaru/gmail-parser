@@ -103,9 +103,9 @@ func writeCSV(data []*etf.ETransfer, dest string) error {
 		return nil
 	}
 	var sb strings.Builder
-	sb.WriteString("Date,Amount,SenderName,SenderEmail,ReceiverName,ReceiverEmail,ReferenceNumber\n")
+	sb.WriteString("ReferenceNumber,Date,Amount,SenderName,SenderEmail,Message,ReceiverName,ReceiverEmail\n")
 	for _, d := range data {
-		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,%s,%s\n", d.Date, d.Amount, d.From.Name, d.From.Email, d.To.Name, d.To.Email, d.RefID)
+		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,%s,%s,%s\n", d.RefID, d.Date, d.Amount, d.From.Name, d.From.Email, d.Message, d.To.Name, d.To.Email)
 	}
 	return os.WriteFile(dest, []byte(sb.String()), 0600)
 }
